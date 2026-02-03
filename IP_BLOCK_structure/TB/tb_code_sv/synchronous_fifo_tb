@@ -1,0 +1,70 @@
+module fifo_dut;
+
+    // --- Signal Declarations ---
+    reg clk;
+    reg rst_n;
+    reg wr_en;
+    reg rd_en;
+    reg [7:0] data_in;
+
+    wire [7:0] data_out;
+    wire full;
+    wire empty;
+
+    // --- DUT Instantiation ---
+    fifo #(
+        .DATA_WIDTH(8),
+        .DEPTH(8)
+    ) u_fifo (
+        .clk(clk),
+        .rst_n(rst_n),
+        .wr_en(wr_en),
+        .rd_en(rd_en),
+        .data_in(data_in),
+        .data_out(data_out),
+        .full(full),
+        .empty(empty)
+    );
+
+    // --- Clock Generation ---
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk;
+    end
+
+    // --- Test Stimulus ---
+    initial begin
+        rst_n = 0; wr_en = 0; rd_en = 0; data_in = 0;
+
+        #20 rst_n = 1; 
+
+        // Write
+        repeat (8) begin
+            @(posedge clk);
+            wr_en = 1;
+            data_in = data_in + 1;
+        end
+        @(posedge clk); wr_en = 0;
+
+        // Read
+        #20;
+        repeat (8) begin
+            @(posedge clk);
+            rd_en = 1;
+        end
+        @(posedge clk); rd_en = 0;
+        
+        #50 $finish;
+    end
+
+    // --- GTKWave Dump Setup ---
+    initial begin
+        // "fifo_waveform.vcd" is the file you will open in GTKWave
+        $dumpfile("fifo_waveform.vcd");
+        
+        // 0 = dump all levels (this module and all children)
+        // fifo_dut = the name of the top-level module to start dumping from
+        $dumpvars(0, fifo_dut);
+    end
+
+endmodule
