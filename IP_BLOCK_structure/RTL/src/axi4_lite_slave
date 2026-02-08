@@ -1,0 +1,113 @@
+module axi4_lite_slave #(
+        parameter ADDRESS = 32,
+        parameter DATA_WIDTH = 32
+)   (
+        //global signals
+        input                         ACLK,         //clock signal
+        input                         ARESETn,      //active low reset signal
+
+        //read address channel
+        input      [ADDRESS-1:0]      ARADDR,       //address of the register to read
+        input                         ARVALID,      //read address is valid when ARVALID is high
+        output                        ARREADY,      //read address is ready when ARREADY is high
+
+        //read data channel
+        input                         RREADY,       //read data is ready when RREADY is high
+        output                        RVALID,       //read data is valid when RVALID is high
+        output     [DATA_WIDTH-1:0]   RDATA,        //read data from the register at the given address
+        output     [1:0]              RRESP,        //read response, 2'b00 for OKAY, 2'b01 for EXOKAY, 2'b10 for SLVERR, 2'b11 for DECERR
+
+        //write address channel
+        input      [ADDRESS-1:0]      AWADDR,       //address of the register to write
+        input                         AWVALID,      //write address is valid when AWVALID is high
+        output                        AWREADY,      //write address is ready when AWREADY is high
+        //write data channel
+        input      [DATA_WIDTH-1:0]   WDATA,        //write data to the register at the given address
+        input                         WVALID,       //write data is valid when WVALID is high
+        input     [DATA_WIDTH/8-1:0]  WSTRB,        //write strobe, one bit for each byte of the write data, 1 for valid byte, 0 for invalid byte
+        output                        WREADY,       //write data is ready when WREADY is high
+
+        //write response channel
+        input                         BREADY,       //write response is ready when BREADY is high
+        output                        BVALID,       //write response is valid when BVALID is high
+        output     [1:0]              BRESP         //write response, 2'b00 for OKAY, 2'b01 for EXOKAY, 2'b10 for SLVERR, 2'b11 for DECERR
+    );
+
+    localaparam number_of_registers = 32;
+
+    logic [DATA_WIDTH-1:0] register [number_of_registers-1:0];//array of registers
+    logic [ADDRESS-1:0] addr;//address of the register to read or write
+    logic write_addr;
+    logic write_data;
+
+    typedef enum logic [2:0] {IDLE, WRITE_CHANNEL, WRESP_CHANNEL, READ_DATA_CHANNEL, READ_ADDR_CHANNEL} state_t;
+    state_type state, nextstate;
+
+    //read address channel
+    assign ARREADY = (state == READ_ADDR_CHANNEL) ? 1 : 0;//read address is ready when in read address channel state
+
+    //read data channel
+    assign RVALID = (state == READ_DATA_CHANNEL) ? 1 : 0;//read data is valid when in read data channel state
+    assign RDATA = (state == READ_DATA_CHANNEL) ? register[addr] : 0;//read data is the value of the register at the given address when in read data channel state
+    assign RRESP = (state == READ_DATA_CHANNEL) ? 2'b00 : 0;//read response is always OKAY
+
+    //write address channel
+    assign AWREADY = (state == WRITE_CHANNEL) ? 1 : 0;//write address is ready when in write channel state
+
+    //write data channel
+    assign WREADY = (state == WRITE_CHANNEL) ? 1 : 0;//write data is ready when in write channel state
+    assign write_addr = AWVALID && AWREADY;//write address is valid when both AWVALID and AWREADY are high
+    assign write_data = WVALID && WREADY;//write data is valid when both WVALID and WREADY are high
+
+    //write response channel
+    assign BVALID = (state == WRESP_CHANNEL) ? 1 : 0;//write response is valid when in write response state
+    assign BRESP = (state == WRESP_CHANNEL) ? 2'b00 : 0;//write response is always OKAY
+
+    integer i;
+
+    always_ff @(posedge ACLK or negedge ARESETn) begin//synchronous reset
+        if (!ARESETn) begin
+            for (i=0; i<32; i++) begin
+                register[i] <= 32'b0;//reset all registers to 0
+            end
+        end
+        else begin
+            if (state == WRITE_CHANNEL) begin//write address and data
+                register[AWADDR] <= WDATA;//write data to register
+            end
+            else if (state == READ_ADDR_CHANNEL) begin//read address
+                addr <= ARADDR;//store read address
+            end
+        end
+    end
+
+    always_ff @(posedge ACLK) begin //state transition logic
+        if (!ARESETn) begin
+            state <= IDLE;//reset state to IDLE
+        end
+        else begin
+            state <= nextstate;//update state to next state
+        end
+    end
+
+    always_comb begin //combinational logic for state transitions
+        case (state)
+            IDLE: begin
+                if (AWVALID) begin
+                    next_state = WRITE_CHANNEL;//if write address is valid, go to write channel state
+                end
+                else if (ARVALID) begin
+                    next_state = READ_ADDR_CHANNEL;//if read address is valid, go to read address channel state
+                end
+                else begin
+                next_state = IDLE;//otherwise, stay in IDLE state
+                end
+
+            end
+            READ_ADDR_CHANNEL   : if (ARVALID && ARREADY) next_state = READ_DATA_CHANNEL;//if read address is valid and ready, go to read data channel state
+            READ_DATA_CHANNEL   : if (RVALID && RREADY) next_state = IDLE
+            WRITE_CHANNEL       : if (write_addr && write_data) next_state = WRESP_CHANNEL;//if write address and data are valid, go to write response channel state
+            WRESP_CHANNEL       : if (BVALID && BREADY) next_state = IDLE
+        endcase
+    end
+endmodule
