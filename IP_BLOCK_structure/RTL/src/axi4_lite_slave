@@ -3,88 +3,85 @@ module axi4_lite_slave #(
         parameter DATA_WIDTH = 32
 )   (
         //global signals
-        input                         ACLK,
-        input                         ARESETn,
+        input                         ACLK, //clock signal
+        input                         ARESETn, //active low reset signal
 
         //read address channel
-        input      [ADDRESS-1:0]      ARADDR,
-        input                         ARVALID,
-        output                        ARREADY,
+        input      [ADDRESS-1:0]      ARADDR, //address of the read transaction
+        input                         ARVALID, //indicates that the read address is valid
+        output                        ARREADY, //indicates that the slave is ready to accept the read address
 
         //read data channel
-        input                         RREADY,
-        output                        RVALID,
-        output     [DATA_WIDTH-1:0]   RDATA,
-        output     [1:0]              RRESP,
+        input                         RREADY, //indicates that the master is ready to accept the read data
+        output                        RVALID, //indicates that the read data is valid
+        output     [DATA_WIDTH-1:0]   RDATA, //data being read from the slave
+        output     [1:0]              RRESP, //read response (00: OKAY, 01: EXOKAY, 10: SLVERR, 11: DECERR)
 
         //write address channel
-        input      [ADDRESS-1:0]      AWADDR,
-        input                         AWVALID,
-        output                        AWREADY,
+        input      [ADDRESS-1:0]      AWADDR, //address of the write transaction
+        input                         AWVALID, //indicates that the write address is valid
+        output                        AWREADY, //indicates that the slave is ready to accept the write address
         //write data channel
-        input      [DATA_WIDTH-1:0]   WDATA,
-        input                         WVALID,
-        input     [DATA_WIDTH/8-1:0]  WSTRB,
-        output                        WREADY,
+        input      [DATA_WIDTH-1:0]   WDATA, //data being written to the slave
+        input                         WVALID, //indicates that the write data is valid
+        input     [DATA_WIDTH/8-1:0]  WSTRB, //write strobe (indicates which bytes of WDATA are valid)
+        output                        WREADY, //indicates that the slave is ready to accept the write data
 
         //write response channel
-        input                         BREADY,
-        output                        BVALID,
-        output     [1:0]              BRESP
+        input                         BREADY, //indicates that the master is ready to accept the write response
+        output                        BVALID, //indicates that the write response is valid
+        output     [1:0]              BRESP //write response (00: OKAY, 01: EXOKAY, 10: SLVERR, 11: DECERR)
     );
 
-    localparam number_of_registers = 32;
+    localparam number_of_registers = 32; // 32 registers of 32 bits each = 128 bytes total address space
 
-    logic [DATA_WIDTH-1:0] register [number_of_registers-1:0];
-    logic [ADDRESS-1:0] addr;
-    logic write_addr;
-    logic write_data;
+    logic [DATA_WIDTH-1:0] register [number_of_registers-1:0]; // Register array to hold the data
+    logic [ADDRESS-1:0] addr; // Register to hold the current address being accessed
+    logic write_addr; // Signal to indicate a valid write address handshake
+    logic write_data; // Signal to indicate a valid write data handshake
 
     typedef enum logic [2:0] {IDLE, WRITE_CHANNEL, WRESP_CHANNEL, READ_DATA_CHANNEL, READ_ADDR_CHANNEL} state_t;
     state_t state, next_state;
 
     // --- ASSIGNMENTS ---
     // Read Channel
-    assign ARREADY = (state == READ_ADDR_CHANNEL);
-    assign RVALID  = (state == READ_DATA_CHANNEL);
-    // [FIX 1] Address Math: Use sliced address [ADDRESS-1:2] to convert byte address to word index
-    assign RDATA   = (state == READ_DATA_CHANNEL) ? register[addr[ADDRESS-1:2]] : '0;
+    assign ARREADY = (state == READ_ADDR_CHANNEL); // Only ready to accept address in the READ_ADDR_CHANNEL state
+    assign RVALID  = (state == READ_DATA_CHANNEL); // Only valid to provide data in the READ_DATA_CHANNEL state
+    assign RDATA   = (state == READ_DATA_CHANNEL) ? register[addr[ADDRESS-1:2]] : '0; // [FIX 1] Address Math: Drop bottom 2 bits to index correctly (4 -> 1)
     assign RRESP   = 2'b00; // OKAY
 
     // Write Channel
-    assign AWREADY = (state == WRITE_CHANNEL);
-    assign WREADY  = (state == WRITE_CHANNEL);
-    assign write_addr = AWVALID && AWREADY;
-    assign write_data = WVALID && WREADY;
+    assign AWREADY = (state == WRITE_CHANNEL); // Only ready to accept address in the WRITE_CHANNEL state
+    assign WREADY  = (state == WRITE_CHANNEL); // Only ready to accept data in the WRITE_CHANNEL state
+    assign write_addr = AWVALID && AWREADY; // Valid handshake for write address
+    assign write_data = WVALID && WREADY; // Valid handshake for write data
 
-    assign BVALID  = (state == WRESP_CHANNEL);
+    assign BVALID  = (state == WRESP_CHANNEL); // Only valid to provide response in the WRESP_CHANNEL state
     assign BRESP   = 2'b00; // OKAY
 
     integer i;
 
     // --- SEQUENTIAL LOGIC (Registers) ---
-    always_ff @(posedge ACLK or negedge ARESETn) begin
+    always_ff @(posedge ACLK or negedge ARESETn) begin 
         if (!ARESETn) begin
-            for (i=0; i<32; i++) begin
-                register[i] <= 32'b0;
+            for (i=0; i<32; i++) begin 
+                register[i] <= 32'b0; // Reset all registers to 0 on reset
             end
         end
-        else begin
-            if (state == WRITE_CHANNEL && write_addr && write_data) begin
-                // [FIX 1] Address Math: Drop bottom 2 bits to index correctly (4 -> 1)
-                register[AWADDR[ADDRESS-1:2]] <= WDATA;
+        else begin // Handle write operations and address capture for read operations
+            if (state == WRITE_CHANNEL && write_addr && write_data) begin // Only write to the register when both address and data handshakes are valid
+                register[AWADDR[ADDRESS-1:2]] <= WDATA; //bottom 2 bits are ignored to index correctly (4 -> 1)
             end
-            else if (state == READ_ADDR_CHANNEL && ARVALID && ARREADY) begin
-                addr <= ARADDR;
+            else if (state == READ_ADDR_CHANNEL && ARVALID && ARREADY) begin // Capture the address for the read transaction when the handshake is valid
+                addr <= ARADDR; // Store the address for use in the read data channel (address math will be handled in the combinational logic for RDATA)
             end
         end
     end
 
     // --- SEQUENTIAL LOGIC (State Machine) ---
-    // [FIX 2] Added async reset sensitivity to match the rest of the design
     always_ff @(posedge ACLK or negedge ARESETn) begin
         if (!ARESETn) begin
-            state <= IDLE;
+            state <= IDLE; //default to IDLE state on reset
         end
         else begin
             state <= next_state;
@@ -93,15 +90,14 @@ module axi4_lite_slave #(
 
     // --- COMBINATIONAL LOGIC (Next State) ---
     always_comb begin
-        // [FIX 3] Default assignment prevents Latches
         next_state = state; 
 
         case (state)
             IDLE: begin
-                if (AWVALID) begin
+                if (AWVALID) begin // If a write address is valid, prioritize the write channel
                     next_state = WRITE_CHANNEL;
                 end
-                else if (ARVALID) begin
+                else if (ARVALID) begin // If a read address is valid, go to the read address channel
                     next_state = READ_ADDR_CHANNEL;
                 end
                 else begin
@@ -109,20 +105,20 @@ module axi4_lite_slave #(
                 end
             end
 
-            READ_ADDR_CHANNEL: begin
-                if (ARVALID && ARREADY) next_state = READ_DATA_CHANNEL;
+            READ_ADDR_CHANNEL: begin // Wait for the read address handshake to complete before moving to the read data channel
+                if (ARVALID && ARREADY) next_state = READ_DATA_CHANNEL; // Once the address handshake is complete, move to the read data channel to provide the data and response
             end
 
-            READ_DATA_CHANNEL: begin
-                if (RVALID && RREADY) next_state = IDLE;
+            READ_DATA_CHANNEL: begin // Wait for the read data handshake to complete before returning to IDLE
+                if (RVALID && RREADY) next_state = IDLE; // Once the data handshake is complete, return to IDLE to wait for the next transaction
             end
 
-            WRITE_CHANNEL: begin
-                if (write_addr && write_data) next_state = WRESP_CHANNEL;
+            WRITE_CHANNEL: begin // Wait for both the write address and write data handshakes to complete before moving to the write response channel
+                if (write_addr && write_data) next_state = WRESP_CHANNEL; // Once both handshakes are complete, move to the write response channel to provide the response
             end
 
-            WRESP_CHANNEL: begin
-                if (BVALID && BREADY) next_state = IDLE;
+            WRESP_CHANNEL: begin // Wait for the write response handshake to complete before returning to IDLE
+                if (BVALID && BREADY) next_state = IDLE; // Once the response handshake is complete, return to IDLE to wait for the next transaction
             end
         endcase
     end
