@@ -1,58 +1,55 @@
-module fifo #(
-    parameter DATA_WIDTH = 8, // Changed to 8-bit for realism
-    parameter DEPTH = 16      // FIFO depth
+module fifo_controller #(
+    parameter DEPTH = 32
 )(
-    input  wire                  clk,
-    input  wire                  rst_n,
-    input  wire                  wr_en,
-    input  wire                  rd_en,
-    input  wire [DATA_WIDTH-1:0] data_in,  // Input Bus
-    output reg  [DATA_WIDTH-1:0] data_out, // Output Bus
-    output wire                  full,
-    output wire                  empty
-);
+    input  logic                        clk,
+    input  logic                        rst_n,
 
-    // Internal memory and pointers
-    reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];
-    reg [$clog2(DEPTH):0] wr_ptr; // Write pointer
-    reg [$clog2(DEPTH):0] rd_ptr; // Read pointer
-    reg [$clog2(DEPTH):0] count;  // How many items in FIFO
+    // Controls (Renamed)
+    input  logic                        write_en,
+    input  logic                        read_en,
+
+    // Output Pointers to RAM
+    output logic [$clog2(DEPTH)-1:0]    waddr,
+    output logic [$clog2(DEPTH)-1:0]    raddr,
 
     // Status Flags
-    assign full  = (count == DEPTH);
-    assign empty = (count == 0);
+    output logic                        full,
+    output logic                        empty
+);
 
-    // Write Logic
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            wr_ptr <= 0;
-        end else if (wr_en && !full) begin
-            mem[wr_ptr] <= data_in;
-            wr_ptr <= (wr_ptr == DEPTH-1) ? 0 : wr_ptr + 1;
-        end
-    end
+    localparam ADDR_WIDTH = $clog2(DEPTH);
 
-    // Read Logic
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            rd_ptr <= 0;
-            data_out <= 0;
-        end else if (rd_en && !empty) begin
-            data_out <= mem[rd_ptr];
-            rd_ptr <= (rd_ptr == DEPTH-1) ? 0 : rd_ptr + 1;
-        end
-    end
+    // N+1 Bit Pointers (e.g., 6 bits for Depth 32)
+    logic [ADDR_WIDTH:0] wr_ptr;
+    logic [ADDR_WIDTH:0] rd_ptr;
 
-    // Counter Logic (to determine full/empty)
-    always @(posedge clk or negedge rst_n) begin
+    // --- Pointer Logic (Natural Overflow) ---
+    always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            count <= 0;
+            wr_ptr <= '0;
+            rd_ptr <= '0;
         end else begin
-            case ({wr_en && !full, rd_en && !empty})
-                2'b10: count <= count + 1; // Write only
-                2'b01: count <= count - 1; // Read only
-                // 2'b11: Read and Write simultaneously -> Count stays same
-            endcase
+            // Increment Write Pointer
+            if (write_en && !full)
+                wr_ptr <= wr_ptr + 1'b1;
+
+            // Increment Read Pointer
+            if (read_en && !empty)
+                rd_ptr <= rd_ptr + 1'b1;
         end
     end
+
+    // --- RAM Address Generation ---
+    // Slice off the Extra Bit (MSB) to get the actual index
+    assign waddr = wr_ptr[ADDR_WIDTH-1:0];
+    assign raddr = rd_ptr[ADDR_WIDTH-1:0];
+
+    // --- Status Flags ---
+    // Empty: Pointers are identical
+    assign empty = (wr_ptr == rd_ptr);
+
+    // Full: MSB is different (wrapped), but lower bits are identical
+    assign full  = (wr_ptr[ADDR_WIDTH] != rd_ptr[ADDR_WIDTH]) && 
+                   (wr_ptr[ADDR_WIDTH-1:0] == rd_ptr[ADDR_WIDTH-1:0]);
+
 endmodule
