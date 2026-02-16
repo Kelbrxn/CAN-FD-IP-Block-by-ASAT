@@ -7,10 +7,10 @@ zynq_can_fd_ip/
     │   │   └── can_fd_ip_top.sv            # Top-level wrapper (AXI <-> PHY)
     │   │
     │   ├── axi_interface/
-    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM
-    │   │   ├── address_decoder.sv          # Generates internal Chip Selects
-    │   │   ├── register_bank.sv            # Config registers (SRR, MSR, BTR)
-    │   │   └── interrupt_manager.sv        # Aggregates IRQ signals
+    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM //check
+    │   │   ├── address_decoder.sv          # Generates internal Chip Selects 
+    │   │   ├── register_bank.sv            # Config registers (SRR, MSR, BTR) //check
+    │   │   └── interrupt_manager.sv        # Aggregates IRQ signals 
     │   │
     │   ├── buffers/
     │   │   ├── fifo_controller.sv          # Read/Write pointer logic
