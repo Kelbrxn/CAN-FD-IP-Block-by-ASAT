@@ -1,0 +1,70 @@
+module interrupt_manager (
+    input  logic        clk,
+    input  logic        rst_n,
+
+    // --- Hardware Events ---
+    input  logic        rx_exists,    // Bit 0: Level High (FIFO not empty)
+    input  logic        tx_done,      // Bit 1: Pulse High (Message Sent)
+    input  logic        error,        // Bit 2: Pulse High (Error Occurred)
+
+    // --- Bus Interface (CPU Access) ---
+    input  logic [3:0]  bus_addr,     // Address Offset (0x0 or 0x4)
+    input  logic        bus_wr_e,     // Write Enable
+    input  logic [31:0] bus_wr_data,  // Write Data
+    output logic [31:0] bus_rd_data,  // Read Data
+
+    // --- Output ---
+    output logic        irq           // Interrupt Request to CPU
+);
+
+    logic [2:0] IER; // Interrupt Enable Register
+    logic [2:0] ISR; // Interrupt Status Register
+
+    // 1. Interrupt Enable Register (IER) - Offset 0x4
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            IER <= 3'b000;
+        end else if (bus_wr_e && (bus_addr == 4'h4)) begin
+            IER <= bus_wr_data[2:0];
+        end
+    end
+
+    // 2. Interrupt Status Register (ISR) - Offset 0x0
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ISR <= 3'b000;
+        end else begin
+            // Bit 0: RX FIFO (Level Sensitive - follows the wire)
+            ISR[0] <= rx_exists; 
+
+            // Bit 1: TX Done (Sticky, W1C)
+            if (tx_done) begin
+                ISR[1] <= 1'b1;
+            end else if (bus_wr_e && (bus_addr == 4'h0) && bus_wr_data[1]) begin
+                ISR[1] <= 1'b0;
+            end
+
+            // Bit 2: Error (Sticky, W1C)
+            if (error) begin
+                ISR[2] <= 1'b1;
+            end else if (bus_wr_e && (bus_addr == 4'h0) && bus_wr_data[2]) begin
+                ISR[2] <= 1'b0;
+            end
+        end
+    end
+
+    // 3. Read Logic
+    always_comb begin
+        case (bus_addr)
+            4'h0: bus_rd_data = {29'd0, ISR};
+            4'h4: bus_rd_data = {29'd0, IER};
+            default: bus_rd_data = 32'd0;
+        endcase
+    end
+
+    // 4. IRQ Output Logic
+    assign irq = (ISR[0] & IER[0]) | 
+                 (ISR[1] & IER[1]) | 
+                 (ISR[2] & IER[2]);
+
+endmodule
