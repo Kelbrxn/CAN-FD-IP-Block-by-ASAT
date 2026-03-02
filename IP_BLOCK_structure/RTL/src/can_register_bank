@@ -1,0 +1,62 @@
+module can_register_bank (
+    input  logic        clk,
+    input  logic        rst_n,
+
+    // CPU Bus Interface
+    input  logic        cs_regs,      // Chip Select
+    input  logic        bus_wr_e,     // Write Enable
+    input  logic [7:0]  bus_addr,     // 8-bit Address (256 bytes of register space)
+    input  logic [31:0] bus_wr_data,  // 32-bit Data In
+    output logic [31:0] bus_rd_data,  // 32-bit Data Out
+
+    // Hardware Status Inputs (from Protocol Engine)
+    input  logic        can_error,    // 1-bit error flag
+    
+    // Hardware Control Outputs (to Protocol Engine)
+    output logic [31:0] out_control, // Control Register Output
+    output logic [31:0] out_baud // Baud Rate Register Output
+);
+
+    // 1. Internal Physical Storage (Discrete Flip-Flops)
+    logic [31:0] control_reg; // Control Register at Offset 0x08
+    logic [31:0] baud_reg; // Baud Rate Register at Offset 0x00
+
+    // 2. Parallel Address Decoding (Combinational Triggers)
+    logic ctrl_we; // Write Enable for Control Register
+    logic baud_we; // Write Enable for Baud Rate Register
+
+    assign baud_we = cs_regs &  bus_wr_e & (bus_addr == 8'h00); //write enable only when address is 0x00 and chip select is active and write enable is high and bus address is 0x00
+    assign ctrl_we = cs_regs &  bus_wr_e & (bus_addr == 8'h08); // write enable only when address is 0x08 and chip select is active and write enable is high and bus address is 0x08
+
+    // 3. High-Speed Sequential Write (Maps to CE Pins)
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            control_reg <= 32'h0; // Reset to default values
+            baud_reg    <= 32'h0; // Reset to default values
+        end else begin
+            if (ctrl_we) control_reg <= bus_wr_data; // Full 32-bit write to control register
+            if (baud_we) baud_reg    <= bus_wr_data; // Full 32-bit write to baud rate register
+        end
+    end
+
+    // 4. Status Packing (Concatenation)
+    logic [31:0] status_reg_wires; // Combinational wires for status bits
+    assign status_reg_wires = {31'b0, can_error}; // Bit 0 is error
+
+    // 5. Read Select Lines (Address Decoding)
+    logic sel_baud, sel_ctrl, sel_status; // One-hot select signals for read multiplexer
+    assign sel_baud   = (bus_addr == 8'h00); // Select Baud Rate Register
+    assign sel_ctrl   = (bus_addr == 8'h08); // Select Control Register
+    assign sel_status = (bus_addr == 8'h10); // Select Status Register (Offset 0x10)
+
+    // 6. Parallel Read Multiplexer (Mask and Merge Structure)
+    // This provides a flat, fast combinational path for reading
+    assign bus_rd_data = (baud_reg         & {32{sel_baud}}) |  // If sel_baud is 1, bus_rd_data gets baud_reg; otherwise it gets 0
+                         (control_reg      & {32{sel_ctrl}}) |  // If sel_ctrl is 1, bus_rd_data gets control_reg; otherwise it gets 0
+                         (status_reg_wires & {32{sel_status}}); // If sel_status is 1, bus_rd_data gets status_reg_wires; otherwise it gets 0
+
+    // 7. Continuous Hardware Broadcast
+    assign out_control = control_reg; // Control register is continuously broadcast to protocol engine
+    assign out_baud    = baud_reg; // Baud rate register is continuously broadcast to protocol engine
+
+endmodule
