@@ -9,7 +9,7 @@ zynq_can_fd_ip/
     │   ├── axi_interface/
     │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM //check
     │   │   ├── address_decoder.sv          # Generates internal Chip Selects //check
-    │   │   ├── register_bank.sv            # Config registers (SRR, MSR, BTR) 
+    │   │   ├── register_bank.sv            # Config registers (SRR, MSR, BTR) //check
     │   │   └── interrupt_manager.sv        # Aggregates IRQ signals //check
     │   │
     │   ├── buffers/
