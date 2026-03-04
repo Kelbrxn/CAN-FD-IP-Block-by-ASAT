@@ -37,14 +37,14 @@ module interrupt_manager (
             // Bit 0: RX FIFO (Level Sensitive - follows the wire)
             ISR[0] <= rx_exists; 
 
-            // Bit 1: TX Done (Sticky, W1C)
+            // Bit 1: TX Done (Sticky)
             if (tx_done) begin
                 ISR[1] <= 1'b1;
             end else if (bus_wr_e && (bus_addr == 4'h0) && bus_wr_data[1]) begin
                 ISR[1] <= 1'b0;
             end
 
-            // Bit 2: Error (Sticky, W1C)
+            // Bit 2: Error (Sticky)
             if (error) begin
                 ISR[2] <= 1'b1;
             end else if (bus_wr_e && (bus_addr == 4'h0) && bus_wr_data[2]) begin
