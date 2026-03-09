@@ -1,0 +1,96 @@
+module axi4_lite_slave #(
+    parameter ADDRESS_WIDTH = 32,
+    parameter DATA_WIDTH = 32
+) (
+    input  logic ACLK, 
+    input  logic ARESETn, 
+
+    // AXI Read Address Channel
+    input  logic [ADDRESS_WIDTH-1:0] ARADDR, 
+    input  logic ARVALID, 
+    output logic ARREADY, 
+
+    // AXI Read Data Channel
+    input  logic RREADY, 
+    output logic RVALID, 
+    output logic [DATA_WIDTH-1:0] RDATA, 
+    output logic [1:0] RRESP, 
+
+    // AXI Write Address Channel
+    input  logic [ADDRESS_WIDTH-1:0] AWADDR, 
+    input  logic AWVALID, 
+    output logic AWREADY, 
+
+    // AXI Write Data Channel
+    input  logic [DATA_WIDTH-1:0] WDATA, 
+    input  logic WVALID, 
+    input  logic [DATA_WIDTH/8-1:0] WSTRB, 
+    output logic WREADY, 
+
+    // AXI Write Response Channel
+    input  logic BREADY, 
+    output logic BVALID, 
+    output logic [1:0] BRESP,
+    
+    // --- NATIVE BUS TO DECODER & REGISTERS ---
+    output logic native_we,                     // 1-cycle Write Enable Pulse
+    output logic [ADDRESS_WIDTH-1:0] native_addr, 
+    output logic [DATA_WIDTH-1:0] native_wdata, 
+    input  logic [DATA_WIDTH-1:0] native_rdata  
+);
+
+    logic [ADDRESS_WIDTH-1:0] addr_reg;
+    logic write_addr_fire, write_data_fire;
+
+    typedef enum logic [2:0] {IDLE, WRITE_CHANNEL, WRESP_CHANNEL, READ_ADDR_CHANNEL, READ_DATA_CHANNEL} state_t;
+    state_t state, next_state;
+
+    // AXI Handshake Assignments
+    assign ARREADY = (state == READ_ADDR_CHANNEL); 
+    assign RVALID  = (state == READ_DATA_CHANNEL); 
+    assign RRESP   = 2'b00; // OKAY
+
+    assign AWREADY = (state == WRITE_CHANNEL); 
+    assign WREADY  = (state == WRITE_CHANNEL); 
+    assign write_addr_fire = AWVALID && AWREADY; 
+    assign write_data_fire = WVALID && WREADY; 
+
+    assign BVALID  = (state == WRESP_CHANNEL); 
+    assign BRESP   = 2'b00; // OKAY
+
+    // Native Bus Routing
+    assign native_wdata = WDATA;
+    assign RDATA        = native_rdata; 
+    assign native_addr  = (state == WRITE_CHANNEL || state == WRESP_CHANNEL) ? AWADDR : addr_reg;
+    
+    // Exact 1-cycle pulse when data and address are safely accepted
+    assign native_we = (state == WRITE_CHANNEL && write_addr_fire && write_data_fire);
+
+    // Sequential Logic
+    always_ff @(posedge ACLK or negedge ARESETn) begin 
+        if (!ARESETn) begin
+            addr_reg <= '0;
+            state    <= IDLE;
+        end else begin 
+            state <= next_state;
+            if (state == READ_ADDR_CHANNEL && ARVALID && ARREADY) begin 
+                addr_reg <= ARADDR; 
+            end
+        end
+    end
+
+    // State Machine
+    always_comb begin
+        next_state = state; 
+        case (state)
+            IDLE: begin
+                if (AWVALID)      next_state = WRITE_CHANNEL;
+                else if (ARVALID) next_state = READ_ADDR_CHANNEL;
+            end
+            READ_ADDR_CHANNEL: if (ARVALID && ARREADY) next_state = READ_DATA_CHANNEL; 
+            READ_DATA_CHANNEL: if (RVALID && RREADY)   next_state = IDLE; 
+            WRITE_CHANNEL:     if (write_addr_fire && write_data_fire) next_state = WRESP_CHANNEL; 
+            WRESP_CHANNEL:     if (BVALID && BREADY)   next_state = IDLE; 
+        endcase
+    end
+endmodule

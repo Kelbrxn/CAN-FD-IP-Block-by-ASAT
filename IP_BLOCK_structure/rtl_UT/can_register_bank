@@ -1,0 +1,62 @@
+module can_register_bank (
+    input  logic clk,
+    input  logic rst_n,
+
+    // Native Bus Interface
+    input  logic        cs_regs,
+    input  logic        bus_wr_e,
+    input  logic [7:0]  bus_addr,     // Only need lower 8 bits here
+    input  logic [31:0] bus_wr_data,
+    output logic [31:0] bus_rd_data,
+
+    // Hardware Interface
+    input  logic        can_error,    // From Core
+    output logic        soft_reset,   // To Core
+    output logic [31:0] out_mode,     // To Core
+    output logic [31:0] out_baud,     // To Core
+    output logic [31:0] out_btr       // To Core (Bit Timing)
+);
+
+    localparam XCAN_SRR_OFFSET  = 8'h00; // Software Reset
+    localparam XCAN_MSR_OFFSET  = 8'h04; // Mode Select
+    localparam XCAN_BRPR_OFFSET = 8'h08; // Baud Rate Prescaler
+    localparam XCAN_BTR_OFFSET  = 8'h0C; // Bit Timing
+    localparam XCAN_SR_OFFSET   = 8'h18; // Status Register
+
+    logic [31:0] srr_reg, msr_reg, brpr_reg, btr_reg;
+
+    logic we_srr  = cs_regs & bus_wr_e & (bus_addr == XCAN_SRR_OFFSET);
+    logic we_msr  = cs_regs & bus_wr_e & (bus_addr == XCAN_MSR_OFFSET);
+    logic we_brpr = cs_regs & bus_wr_e & (bus_addr == XCAN_BRPR_OFFSET);
+    logic we_btr  = cs_regs & bus_wr_e & (bus_addr == XCAN_BTR_OFFSET);
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            srr_reg  <= 32'h0; msr_reg <= 32'h0;
+            brpr_reg <= 32'h0; btr_reg <= 32'h0;
+        end else begin
+            if (we_srr)  srr_reg  <= bus_wr_data;
+            if (we_msr)  msr_reg  <= bus_wr_data;
+            if (we_brpr) brpr_reg <= bus_wr_data;
+            if (we_btr)  btr_reg  <= bus_wr_data;
+        end
+    end
+
+    logic [31:0] status_reg_wires;
+    assign status_reg_wires = {31'b0, can_error};
+
+    // Fast Combinational Read Mux
+    assign bus_rd_data = 
+        (srr_reg          & {32{bus_addr == XCAN_SRR_OFFSET}})  |
+        (msr_reg          & {32{bus_addr == XCAN_MSR_OFFSET}})  |
+        (brpr_reg         & {32{bus_addr == XCAN_BRPR_OFFSET}}) |
+        (btr_reg          & {32{bus_addr == XCAN_BTR_OFFSET}})  |
+        (status_reg_wires & {32{bus_addr == XCAN_SR_OFFSET}});
+
+    // Broadcast to Core
+    assign soft_reset = srr_reg[0];
+    assign out_mode   = msr_reg;
+    assign out_baud   = brpr_reg;
+    assign out_btr    = btr_reg;
+
+endmodule

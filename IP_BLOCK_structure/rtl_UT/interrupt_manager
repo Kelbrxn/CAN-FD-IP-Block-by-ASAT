@@ -1,0 +1,59 @@
+module interrupt_manager (
+    input  logic clk,
+    input  logic rst_n,
+
+    // Hardware Events
+    input  logic rx_exists, // Bit 0
+    input  logic tx_done,   // Bit 1
+    input  logic error,     // Bit 2
+
+    // Native Bus Interface
+    input  logic        cs_regs,
+    input  logic [7:0]  bus_addr, 
+    input  logic        bus_wr_e, 
+    input  logic [31:0] bus_wr_data,
+    output logic [31:0] bus_rd_data,
+    
+    output logic        irq
+);
+
+    localparam XCAN_ISR_OFFSET = 8'h1C; // Status
+    localparam XCAN_IER_OFFSET = 8'h20; // Enable
+    localparam XCAN_ICR_OFFSET = 8'h24; // Clear
+
+    logic [2:0] IER; 
+    logic [2:0] ISR; 
+
+    // Enable Register
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) IER <= 3'b0;
+        else if (cs_regs && bus_wr_e && (bus_addr == XCAN_IER_OFFSET))
+            IER <= bus_wr_data[2:0];
+    end
+
+    // Status & Clear Register
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ISR <= 3'b0;
+        end else begin
+            // Hardware Sets bits
+            if (rx_exists) ISR[0] <= 1'b1;
+            if (tx_done)   ISR[1] <= 1'b1;
+            if (error)     ISR[2] <= 1'b1;
+
+            // CPU Clears bits via ICR
+            if (cs_regs && bus_wr_e && (bus_addr == XCAN_ICR_OFFSET)) begin
+                if (bus_wr_data[0]) ISR[0] <= 1'b0;
+                if (bus_wr_data[1]) ISR[1] <= 1'b0;
+                if (bus_wr_data[2]) ISR[2] <= 1'b0;
+            end
+        end
+    end
+
+    assign bus_rd_data = 
+        ({29'd0, ISR} & {32{bus_addr == XCAN_ISR_OFFSET}}) |
+        ({29'd0, IER} & {32{bus_addr == XCAN_IER_OFFSET}});
+
+    assign irq = |(ISR & IER); 
+
+endmodule

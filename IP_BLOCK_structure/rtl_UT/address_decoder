@@ -1,0 +1,15 @@
+module address_decoder (
+    input  logic [31:0] native_addr, // Full 32-bit address from Bridge
+
+    output logic cs_regs,       // 0x0000 - 0x00FF (Registers & Interrupts)
+    output logic cs_tx_fifo,    // 0x0100 - 0x01FF (TX Mailbox)
+    output logic cs_filters,    // 0x0A00 - 0x0AFF (Acceptance Filters)
+    output logic cs_rx_fifo     // 0x1100 - 0x11FF (RX Mailbox)
+);
+
+    assign cs_regs    = (native_addr[15:8] == 8'h00); 
+    assign cs_tx_fifo = (native_addr[15:8] == 8'h01); 
+    assign cs_filters = (native_addr[15:8] == 8'h0A);
+    assign cs_rx_fifo = (native_addr[15:8] == 8'h11); 
+
+endmodule
