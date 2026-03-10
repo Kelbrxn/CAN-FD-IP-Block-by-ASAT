@@ -1,5 +1,3 @@
-# CAN-FD-IP-Block-by-ASAT
-
 zynq_can_fd_ip/
 └── rtl/
     ├── src/
@@ -7,14 +5,17 @@ zynq_can_fd_ip/
     │   │   └── can_fd_ip_top.sv            # Top-level wrapper (AXI <-> PHY)
     │   │
     │   ├── axi_interface/
-    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM //check
-    │   │   ├── address_decoder.sv          # Generates internal Chip Selects //check
-    │   │   ├── register_bank.sv            # Config registers (SRR, MSR, BTR) //check
-    │   │   └── interrupt_manager.sv        # Aggregates IRQ signals //check
+    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM
+    │   │   ├── address_decoder.sv          # Generates internal Chip Selects (Updated for Mailbox/ECC offsets)
+    │   │   ├── register_bank.sv            # Config & Status registers (SRR, MSR, BTR, SR, ECR)
+    │   │   ├── interrupt_manager.sv        # Aggregates IRQ signals (ISR, IER, ICR)
+    │   │   └── acceptance_filter_bank.sv   # **NEW:** Holds memory-mapped ID/Mask registers (0x60, 0xE0)
     │   │
     │   ├── buffers/
-    │   │   ├── fifo_controller.sv          # Read/Write pointer logic //check
-    │   │   └── ram_wrapper.sv              # Standard BRAM primitive //check
+    │   │   ├── tx_mailbox_manager.sv       # **NEW/REPLACED:** Manages TX Message Space (0x100) & Ready Request (0x90)
+    │   │   ├── rx_buffer_manager.sv        # **NEW/REPLACED:** Manages RX Message Space (0x1100) & FIFO Status (FSR)
+    │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4)
+    │   │   └── ram_wrapper.sv              # Standard Dual-Port BRAM primitive (used by TX/RX managers)
     │   │
     │   ├── can_core/
     │   │   ├── top/
@@ -23,7 +24,8 @@ zynq_can_fd_ip/
     │   │   ├── timing/
     │   │   │   ├── bit_timing_logic.sv     # Prescaler & Time Quanta generation
     │   │   │   ├── sync_logic.sv           # Hard Sync & Resync (SJW)
-    │   │   │   └── tdc_logic.sv            # Transceiver Delay Compensation (FD)
+    │   │   │   ├── tdc_measure.sv          # **NEW:** Transceiver Delay Compensation (calculates TDCV feedback)
+    │   │   │   └── timestamp_generator.sv  # **NEW:** Global timer for RX message timestamping
     │   │   │
     │   │   ├── stream/
     │   │   │   ├── stream_processor_top.sv # Serializer/Deserializer
@@ -39,12 +41,12 @@ zynq_can_fd_ip/
     │   │   │
     │   │   └── control/
     │   │       ├── protocol_fsm.sv         # Main ISO 11898-1 State Machine
-    │   │       ├── error_management.sv     # TEC/REC counters & Bus Off logic
-    │   │       └── acceptance_filter.sv    # ID Mask/Code comparison
+    │   │       ├── error_management.sv     # TEC/REC counters & Bus Off logic (feeds to ECR in AXI)
+    │   │       └── acceptance_filter.sv    # Hardware comparator (checks bus stream against the filter bank)
     │   │
     │   └── phy_interface/
-    │       └── phy_adapter.sv              # Loopback MUX & IO Pad drivers
+    │       └── phy_adapter.sv              # Loopback MUX & IO Pad drivers (TX/RX)
     │
     └── includes/
         ├── can_defines.vh                  # Constants (FDF, DLC, Intermission)
-        └── register_offsets.vh             # Memory Map (0x00, 0x04...)
+        └── register_offsets.vh             # Memory Map (Will hold all 0x00 to 0x2100 Xilinx offsets)
