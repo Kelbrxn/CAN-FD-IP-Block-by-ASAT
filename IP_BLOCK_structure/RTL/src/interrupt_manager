@@ -1,13 +1,13 @@
 module interrupt_manager (
-    input  logic        clk,
-    input  logic        rst_n,
+    input  logic clk,
+    input  logic rst_n,
 
-    // Hardware Events
-    input  logic        rx_exists, // Bit 0
-    input  logic        tx_done,   // Bit 1
-    input  logic        error,     // Bit 2
+    // Hardware Events (Pulses from Core)
+    input  logic tx_done_pulse,  
+    input  logic rx_done_pulse,  
+    input  logic error_pulse,    
 
-    // Bus Interface (Routed from Address Decoder)
+    // Native Bus Interface
     input  logic        cs_regs,
     input  logic [7:0]  bus_addr, 
     input  logic        bus_wr_e, 
@@ -17,45 +17,48 @@ module interrupt_manager (
     output logic        irq
 );
 
-    localparam XCAN_ISR_OFFSET = 8'h1C;
-    localparam XCAN_IER_OFFSET = 8'h20;
-    localparam XCAN_ICR_OFFSET = 8'h24;
+    localparam XCAN_ISR_OFFSET = 8'h1C; 
+    localparam XCAN_IER_OFFSET = 8'h20; 
+    localparam XCAN_ICR_OFFSET = 8'h24; 
 
-    logic [2:0] IER; 
-    logic [2:0] ISR; 
+    // Xilinx Driver Specific Masks
+    localparam BIT_TXOK  = 1;
+    localparam BIT_RXOK  = 4;
+    localparam BIT_ERROR = 8;
 
-    // 1. Interrupt Enable Register (IER)
+    logic [31:0] IER; 
+    logic [31:0] ISR; 
+
+    // IER (Interrupt Enable Register)
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) IER <= 3'b0;
+        if (!rst_n) IER <= 32'h0;
         else if (cs_regs && bus_wr_e && (bus_addr == XCAN_IER_OFFSET))
-            IER <= bus_wr_data[2:0];
+            IER <= bus_wr_data;
     end
 
-    // 2. Interrupt Status Register (ISR) & Interrupt Clear (ICR)
+    // ISR (Interrupt Status Register) - Write 1 to Clear
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            ISR <= 3'b0;
+            ISR <= 32'h0;
         end else begin
-            // Hardware Sets the Status
-            if (rx_exists) ISR[0] <= 1'b1;
-            if (tx_done)   ISR[1] <= 1'b1;
-            if (error)     ISR[2] <= 1'b1;
-
-            // CPU Clears the Status (Write 1 to Clear via ICR)
+            // 1. Clear bits if CPU writes to ICR
             if (cs_regs && bus_wr_e && (bus_addr == XCAN_ICR_OFFSET)) begin
-                if (bus_wr_data[0]) ISR[0] <= 1'b0;
-                if (bus_wr_data[1]) ISR[1] <= 1'b0;
-                if (bus_wr_data[2]) ISR[2] <= 1'b0;
+                ISR <= ISR & ~bus_wr_data; 
             end
+            
+            // 2. Hardware sets bits (Overrides clear if simultaneous)
+            if (tx_done_pulse) ISR[BIT_TXOK]  <= 1'b1;
+            if (rx_done_pulse) ISR[BIT_RXOK]  <= 1'b1;
+            if (error_pulse)   ISR[BIT_ERROR] <= 1'b1;
         end
     end
 
-    // 3. Read Multiplexer
+    // Read Multiplexer
     assign bus_rd_data = 
-        ({29'd0, ISR} & {32{bus_addr == XCAN_ISR_OFFSET}}) |
-        ({29'd0, IER} & {32{bus_addr == XCAN_IER_OFFSET}});
+        (cs_regs && bus_addr == XCAN_ISR_OFFSET) ? ISR :
+        (cs_regs && bus_addr == XCAN_IER_OFFSET) ? IER : 32'h0;
 
-    // 4. IRQ to CPU
-    assign irq = |(ISR & IER); // Bitwise AND, then Reduction OR
+    // Trigger CPU IRQ line if any Enabled Status bit is High
+    assign irq = |(ISR & IER); 
 
 endmodule
