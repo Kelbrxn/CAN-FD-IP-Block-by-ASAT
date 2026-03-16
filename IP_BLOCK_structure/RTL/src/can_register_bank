@@ -1,62 +1,88 @@
 module can_register_bank (
-    input  logic        clk,
-    input  logic        rst_n,
+    input  logic clk,
+    input  logic rst_n,
 
-    // CPU Bus Interface
-    input  logic        cs_regs,      // Chip Select
-    input  logic        bus_wr_e,     // Write Enable
-    input  logic [7:0]  bus_addr,     // 8-bit Address (256 bytes of register space)
-    input  logic [31:0] bus_wr_data,  // 32-bit Data In
-    output logic [31:0] bus_rd_data,  // 32-bit Data Out
+    // Native Bus Interface
+    input  logic        cs_regs,
+    input  logic        bus_wr_e,
+    input  logic [7:0]  bus_addr,     
+    input  logic [31:0] bus_wr_data,
+    output logic [31:0] bus_rd_data,
 
-    // Hardware Status Inputs (from Protocol Engine)
-    input  logic        can_error,    // 1-bit error flag
-    
-    // Hardware Control Outputs (to Protocol Engine)
-    output logic [31:0] out_control, // Control Register Output
-    output logic [31:0] out_baud // Baud Rate Register Output
+    // Hardware Interface
+    input  logic        can_error,    
+    output logic        soft_reset,   
+    output logic [31:0] out_mode,     
+    output logic [31:0] out_baud,     
+    output logic [31:0] out_btr,
+    output logic [31:0] out_f_baud,   // FD Data Phase Baud
+    output logic [31:0] out_f_btr,    // FD Data Phase BTR
+    output logic        tx_trigger    // Pulses when CPU writes to TRR (0x90)
 );
 
-    // 1. Internal Physical Storage (Discrete Flip-Flops)
-    logic [31:0] control_reg; // Control Register at Offset 0x08
-    logic [31:0] baud_reg; // Baud Rate Register at Offset 0x00
+    localparam XCAN_SRR_OFFSET    = 8'h00; 
+    localparam XCAN_MSR_OFFSET    = 8'h04; 
+    localparam XCAN_BRPR_OFFSET   = 8'h08; 
+    localparam XCAN_BTR_OFFSET    = 8'h0C; 
+    localparam XCAN_SR_OFFSET     = 8'h18; 
+    localparam XCAN_F_BRPR_OFFSET = 8'h88; // CAN FD Data Baud
+    localparam XCAN_F_BTR_OFFSET  = 8'h8C; // CAN FD Data Timing
+    localparam XCAN_TRR_OFFSET    = 8'h90; // TX Ready Request
 
-    // 2. Parallel Address Decoding (Combinational Triggers)
-    logic ctrl_we; // Write Enable for Control Register
-    logic baud_we; // Write Enable for Baud Rate Register
+    logic [31:0] srr_reg, msr_reg, brpr_reg, btr_reg, f_brpr_reg, f_btr_reg;
 
-    assign baud_we = cs_regs &  bus_wr_e & (bus_addr == 8'h00); //write enable only when address is 0x00 and chip select is active and write enable is high and bus address is 0x00
-    assign ctrl_we = cs_regs &  bus_wr_e & (bus_addr == 8'h08); // write enable only when address is 0x08 and chip select is active and write enable is high and bus address is 0x08
-
-    // 3. High-Speed Sequential Write (Maps to CE Pins)
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            control_reg <= 32'h0; // Reset to default values
-            baud_reg    <= 32'h0; // Reset to default values
+            srr_reg    <= 32'h00000001; // Default to Reset State
+            msr_reg    <= 32'h0;
+            brpr_reg   <= 32'h0; 
+            btr_reg    <= 32'h0;
+            f_brpr_reg <= 32'h0;
+            f_btr_reg  <= 32'h0;
+            tx_trigger <= 1'b0;
         end else begin
-            if (ctrl_we) control_reg <= bus_wr_data; // Full 32-bit write to control register
-            if (baud_we) baud_reg    <= bus_wr_data; // Full 32-bit write to baud rate register
+            tx_trigger <= 1'b0; // Default to 0, pulses high for 1 clock
+            if (cs_regs & bus_wr_e) begin
+                case (bus_addr)
+                    XCAN_SRR_OFFSET:    srr_reg    <= bus_wr_data;
+                    XCAN_MSR_OFFSET:    msr_reg    <= bus_wr_data;
+                    XCAN_BRPR_OFFSET:   brpr_reg   <= bus_wr_data;
+                    XCAN_BTR_OFFSET:    btr_reg    <= bus_wr_data;
+                    XCAN_F_BRPR_OFFSET: f_brpr_reg <= bus_wr_data;
+                    XCAN_F_BTR_OFFSET:  f_btr_reg  <= bus_wr_data;
+                    XCAN_TRR_OFFSET:    tx_trigger <= bus_wr_data[0]; // Trigger!
+                endcase
+            end
         end
     end
 
-    // 4. Status Packing (Concatenation)
-    logic [31:0] status_reg_wires; // Combinational wires for status bits
-    assign status_reg_wires = {31'b0, can_error}; // Bit 0 is error
+    // Status Register Logic (Mocking the expected driver response)
+    // If SRR[0] is 1, we are in CONFIG mode (bit 0 = 1). Otherwise, NORMAL mode (bit 3 = 1).
+    logic [31:0] status_reg_wires;
+    assign status_reg_wires = srr_reg[0] ? 32'h00000001 : 32'h00000008;
 
-    // 5. Read Select Lines (Address Decoding)
-    logic sel_baud, sel_ctrl, sel_status; // One-hot select signals for read multiplexer
-    assign sel_baud   = (bus_addr == 8'h00); // Select Baud Rate Register
-    assign sel_ctrl   = (bus_addr == 8'h08); // Select Control Register
-    assign sel_status = (bus_addr == 8'h10); // Select Status Register (Offset 0x10)
+    // Fast Combinational Read Mux
+    always_comb begin
+        bus_rd_data = 32'h0;
+        if (cs_regs) begin
+            case (bus_addr)
+                XCAN_SRR_OFFSET:    bus_rd_data = srr_reg;
+                XCAN_MSR_OFFSET:    bus_rd_data = msr_reg;
+                XCAN_BRPR_OFFSET:   bus_rd_data = brpr_reg;
+                XCAN_BTR_OFFSET:    bus_rd_data = btr_reg;
+                XCAN_SR_OFFSET:     bus_rd_data = status_reg_wires; // Critical for driver!
+                XCAN_F_BRPR_OFFSET: bus_rd_data = f_brpr_reg;
+                XCAN_F_BTR_OFFSET:  bus_rd_data = f_btr_reg;
+            endcase
+        end
+    end
 
-    // 6. Parallel Read Multiplexer (Mask and Merge Structure)
-    // This provides a flat, fast combinational path for reading
-    assign bus_rd_data = (baud_reg         & {32{sel_baud}}) |  // If sel_baud is 1, bus_rd_data gets baud_reg; otherwise it gets 0
-                         (control_reg      & {32{sel_ctrl}}) |  // If sel_ctrl is 1, bus_rd_data gets control_reg; otherwise it gets 0
-                         (status_reg_wires & {32{sel_status}}); // If sel_status is 1, bus_rd_data gets status_reg_wires; otherwise it gets 0
-
-    // 7. Continuous Hardware Broadcast
-    assign out_control = control_reg; // Control register is continuously broadcast to protocol engine
-    assign out_baud    = baud_reg; // Baud rate register is continuously broadcast to protocol engine
+    // Broadcast to Core
+    assign soft_reset = srr_reg[0];
+    assign out_mode   = msr_reg;
+    assign out_baud   = brpr_reg;
+    assign out_btr    = btr_reg;
+    assign out_f_baud = f_brpr_reg;
+    assign out_f_btr  = f_btr_reg;
 
 endmodule
