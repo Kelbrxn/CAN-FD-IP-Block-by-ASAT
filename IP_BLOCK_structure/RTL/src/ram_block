@@ -1,34 +1,38 @@
 module ram_block #(
-    parameter DEPTH = 32,
-    parameter DATA_WIDTH = 32
+    parameter DATA_WIDTH = 32,
+    parameter DEPTH = 256
 )(
-    input  logic                         clk,        // Clock signal
-    input  logic                         write_en,   // Write enable signal
-    input  logic                         read_en,    // Read enable signal
-    input  logic [DATA_WIDTH-1:0]        data_in,    // Data input for write operations
-    output logic [DATA_WIDTH-1:0]        data_out,   // Data output for read operations
-    input  logic [$clog2(DEPTH)-1:0]     write_addr, // Write address
-    input  logic [$clog2(DEPTH)-1:0]     read_addr   // Read address
+    // AXI Port
+    input  logic                     clk_axi,
+    input  logic                     we_axi,
+    input  logic [$clog2(DEPTH)-1:0] addr_axi,
+    input  logic [DATA_WIDTH-1:0]    din_axi,
+    output logic [DATA_WIDTH-1:0]    dout_axi,
+
+    // Core Port
+    input  logic                     clk_core,
+    input  logic                     we_core,
+    input  logic [$clog2(DEPTH)-1:0] addr_core,
+    input  logic [DATA_WIDTH-1:0]    din_core,
+    output logic [DATA_WIDTH-1:0]    dout_core
 );
 
-    // Internal RAM array
-    // Vivado will typically infer "Distributed RAM" (LUTRAM) for small depths (32)
-    // and "Block RAM" (BRAM) for larger depths (>= 512).
-    logic [DATA_WIDTH-1:0] ram [DEPTH-1:0]; 
+    logic [DATA_WIDTH-1:0] ram [DEPTH-1:0];
 
-    // Synchronous Write Operation
-    always_ff @(posedge clk) begin
-        if (write_en) begin
-            ram[write_addr] <= data_in;
+    // AXI Port Logic
+    always_ff @(posedge clk_axi) begin
+        if (we_axi) begin
+            ram[addr_axi] <= din_axi;
         end
+        dout_axi <= ram[addr_axi]; 
     end
 
-    // Synchronous Read Operation
-    // Standard RAMs in Vivado usually have at least one cycle of read latency.
-    always_ff @(posedge clk) begin
-        if (read_en) begin
-            data_out <= ram[read_addr];
+    // Core Port Logic
+    always_ff @(posedge clk_core) begin
+        if (we_core) begin
+            ram[addr_core] <= din_core;
         end
+        dout_core <= ram[addr_core];
     end
 
 endmodule
