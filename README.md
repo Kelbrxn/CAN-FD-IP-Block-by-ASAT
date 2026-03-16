@@ -5,17 +5,17 @@ zynq_can_fd_ip/
     │   │   └── can_fd_ip_top.sv            # Top-level wrapper (AXI <-> PHY)
     │   │
     │   ├── axi_interface/
-    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM
-    │   │   ├── address_decoder.sv          # Generates internal Chip Selects (Updated for Mailbox/ECC offsets)
-    │   │   ├── register_bank.sv            # Config & Status registers (SRR, MSR, BTR, SR, ECR)
-    │   │   ├── interrupt_manager.sv        # Aggregates IRQ signals (ISR, IER, ICR)
+    │   │   ├── axi_slave_interface.sv      # Main AXI Handshake FSM //check
+    │   │   ├── address_decoder.sv          # Generates internal Chip Selects (Updated for Mailbox/ECC offsets) //check
+    │   │   ├── register_bank.sv            # Config & Status registers (SRR, MSR, BTR, SR, ECR) //check
+    │   │   ├── interrupt_manager.sv        # Aggregates IRQ signals (ISR, IER, ICR) //check
     │   │   └── acceptance_filter_bank.sv   # **NEW:** Holds memory-mapped ID/Mask registers (0x60, 0xE0)
     │   │
     │   ├── buffers/
     │   │   ├── tx_mailbox_manager.sv       # **NEW/REPLACED:** Manages TX Message Space (0x100) & Ready Request (0x90)
     │   │   ├── rx_buffer_manager.sv        # **NEW/REPLACED:** Manages RX Message Space (0x1100) & FIFO Status (FSR)
-    │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4)
-    │   │   └── ram_wrapper.sv              # Standard Dual-Port BRAM primitive (used by TX/RX managers)
+    │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4) 
+    │   │   └── ram_wrapper.sv              # Standard Dual-Port BRAM primitive (used by TX/RX managers) //check
     │   │
     │   ├── can_core/
     │   │   ├── top/
