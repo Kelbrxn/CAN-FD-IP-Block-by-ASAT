@@ -1,0 +1,131 @@
+`timescale 1ns / 1ps
+
+module tb_ram_block();
+
+    // Parameters
+    localparam DATA_WIDTH = 32;
+    localparam DEPTH = 256;
+    localparam ADDR_WIDTH = $clog2(DEPTH);
+
+    // Clock Periods
+    localparam AXI_CLK_PERIOD = 10; // 100 MHz
+    localparam CORE_CLK_PERIOD = 25; // 40 MHz
+
+    // Signals
+    logic clk_axi;
+    logic we_axi;
+    logic [ADDR_WIDTH-1:0] addr_axi;
+    logic [DATA_WIDTH-1:0] din_axi;
+    logic [DATA_WIDTH-1:0] dout_axi;
+
+    logic clk_core;
+    logic we_core;
+    logic [ADDR_WIDTH-1:0] addr_core;
+    logic [DATA_WIDTH-1:0] din_core;
+    logic [DATA_WIDTH-1:0] dout_core;
+
+    // Instantiate the Device Under Test (DUT)
+    ram_block #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .DEPTH(DEPTH)
+    ) dut (
+        .clk_axi(clk_axi),     .we_axi(we_axi),
+        .addr_axi(addr_axi),   .din_axi(din_axi),   .dout_axi(dout_axi),
+        .clk_core(clk_core),   .we_core(we_core),
+        .addr_core(addr_core), .din_core(din_core), .dout_core(dout_core)
+    );
+
+    // Generate Asynchronous Clocks
+    initial begin
+        clk_axi = 0;
+        forever #(AXI_CLK_PERIOD / 2) clk_axi = ~clk_axi;
+    end
+
+    initial begin
+        clk_core = 0;
+        forever #(CORE_CLK_PERIOD / 2) clk_core = ~clk_core;
+    end
+
+    // --- Tasks for Clean Stimulus ---
+    
+    // AXI Write Task
+    task write_axi(input [ADDR_WIDTH-1:0] addr, input [DATA_WIDTH-1:0] data);
+        @(posedge clk_axi);
+        we_axi   <= 1'b1;
+        addr_axi <= addr;
+        din_axi  <= data;
+        @(posedge clk_axi);
+        we_axi   <= 1'b0;
+    endtask
+
+    // Core Write Task
+    task write_core(input [ADDR_WIDTH-1:0] addr, input [DATA_WIDTH-1:0] data);
+        @(posedge clk_core);
+        we_core   <= 1'b1;
+        addr_core <= addr;
+        din_core  <= data;
+        @(posedge clk_core);
+        we_core   <= 1'b0;
+    endtask
+
+    // Main Test Sequence
+    initial begin
+        // Initialize Signals
+        we_axi = 0; addr_axi = 0; din_axi = 0;
+        we_core = 0; addr_core = 0; din_core = 0;
+
+        // Setup Waveform Dumping
+        $dumpfile("ram_block_waves.vcd");
+        $dumpvars(0, tb_ram_block);
+
+        $display("\n--- Starting Dual-Port RAM Test ---");
+
+        // Wait a few clocks for stability
+        #(100);
+
+        // ---------------------------------------------------------
+        // Test 1: Write from Fast AXI, Read from Slow Core
+        // ---------------------------------------------------------
+        $display("[TIME: %0t] Test 1: AXI -> Core", $time);
+        write_axi(8'h05, 32'hDEAD_BEEF);
+        
+        // Wait a bit, then ask the Core to read it
+        #(50); 
+        @(posedge clk_core);
+        addr_core <= 8'h05;
+        
+        // Data should appear on the NEXT clock edge (Read-First behavior)
+        @(posedge clk_core);
+        #1; // Tiny delay to avoid sampling race conditions in TB
+        if (dout_core !== 32'hDEAD_BEEF) 
+            $error("Test 1 Failed! Expected DEAD_BEEF, got %h", dout_core);
+        else 
+            $display("Test 1 Passed: Core successfully read data written by AXI.");
+
+        // ---------------------------------------------------------
+        // Test 2: Write from Slow Core, Read from Fast AXI
+        // ---------------------------------------------------------
+        $display("\n[TIME: %0t] Test 2: Core -> AXI", $time);
+        write_core(8'h42, 32'h1234_5678);
+        
+        // Wait a bit, then ask AXI to read it
+        #(50);
+        @(posedge clk_axi);
+        addr_axi <= 8'h42;
+        
+        @(posedge clk_axi);
+        #1; 
+        if (dout_axi !== 32'h1234_5678) 
+            $error("Test 2 Failed! Expected 1234_5678, got %h", dout_axi);
+        else 
+            $display("Test 2 Passed: AXI successfully read data written by Core.");
+
+        // ---------------------------------------------------------
+        // Finish
+        // ---------------------------------------------------------
+        #(100);
+        $display("\n--- All Tests Completed ---");
+        $finish;
+    end
+
+endmodule
