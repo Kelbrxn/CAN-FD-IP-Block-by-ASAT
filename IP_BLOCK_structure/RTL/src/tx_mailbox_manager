@@ -1,0 +1,99 @@
+module tx_mailbox_manager #(
+    parameter DATA_WIDTH = 32
+)(
+    // --- System / AXI Interface (Fast Clock Domain) ---
+    input  logic                  clk_sys,
+    input  logic                  rst_n,
+    input  logic [DATA_WIDTH-1:0] bus_addr,
+    input  logic                  bus_we,
+    input  logic [DATA_WIDTH-1:0] bus_wr_data,
+    output logic [DATA_WIDTH-1:0] bus_rd_data, 
+    input  logic                  cs_tx,
+
+    // --- Control Interface ---
+    input  logic                  tx_trigger, // From Register Bank
+    
+    // --- CAN Core Interface (Precise Clock Domain) ---
+    input  logic                  clk_core,
+    output logic                  tx_ready,   // Tells core: "Read me!"
+    input  logic                  tx_done,    // From core: "I'm finished."
+    input  logic [4:0]            addr_core,  // 32-word depth = 5 bit address
+    output logic [DATA_WIDTH-1:0] dout_core
+);
+
+    // ==========================================
+    // Internal Signals
+    // ==========================================
+    logic [4:0]            ram_addr_axi;
+    logic [DATA_WIDTH-1:0] dout_axi;
+
+    // CDC Synchronizer Signals
+    logic       tx_toggle;
+    logic [1:0] sync_regs;
+    logic       sync_delay;
+    logic       core_trigger_pulse;
+
+    // ==========================================
+    // 1. Address Translation (AXI Byte to RAM Word)
+    // ==========================================
+    // Subtract base (0x0100) and drop bottom 2 bits (divide by 4)
+    assign ram_addr_axi = (bus_addr - 32'h0100) >> 2; 
+    
+    // Allow CPU to read back what it wrote
+    assign bus_rd_data = dout_axi; 
+
+    // ==========================================
+    // 2. The Bridge: Toggle Pulse Synchronizer
+    // ==========================================
+    // Step A: Toggle on fast sys clock
+    always_ff @(posedge clk_sys or negedge rst_n) begin
+        if (!rst_n) begin
+            tx_toggle <= 1'b0;
+        end else if (tx_trigger) begin
+            tx_toggle <= ~tx_toggle;
+        end
+    end
+
+    // Step B & C: Synchronize and detect edge on slow core clock
+    always_ff @(posedge clk_core) begin
+        sync_regs  <= {sync_regs[0], tx_toggle}; // Shift register
+        sync_delay <= sync_regs[1];              // 1-cycle delay for edge detection
+    end
+
+    // Edge occurs when current sync value differs from delayed value
+    assign core_trigger_pulse = sync_regs[1] ^ sync_delay;
+
+    // ==========================================
+    // 3. Handshake: Memory Ownership State Machine
+    // ==========================================
+    always_ff @(posedge clk_core) begin
+        if (core_trigger_pulse) begin
+            tx_ready <= 1'b1; // Lock memory, CPU is done writing
+        end else if (tx_done) begin
+            tx_ready <= 1'b0; // Unlock memory, Core is done sending
+        end
+    end
+
+    // ==========================================
+    // 4. Primitive Storage: True Dual-Port RAM
+    // ==========================================
+    ram_block #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .DEPTH(32) 
+    ) mailbox_ram (
+        // Port A: System Side
+        .clk_axi  (clk_sys),
+        .we_axi   (bus_we && cs_tx), // Only write if targeted
+        .addr_axi (ram_addr_axi),
+        .din_axi  (bus_wr_data),
+        .dout_axi (dout_axi),
+
+        // Port B: CAN Core Side
+        .clk_core (clk_core),
+        .we_core  (1'b0),            // Core never writes to TX Mailbox
+        .addr_core(addr_core),
+        .din_core (32'h0),
+        .dout_core(dout_core)
+    );
+
+endmodule
