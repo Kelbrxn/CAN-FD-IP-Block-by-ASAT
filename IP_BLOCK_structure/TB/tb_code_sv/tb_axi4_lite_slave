@@ -1,0 +1,175 @@
+`timescale 1ns / 1ps
+
+module tb_axi4_lite_slave();
+
+    // ---------------------------------------------------------
+    // Parameters
+    // ---------------------------------------------------------
+    parameter ADDRESS = 32;
+    parameter DATA_WIDTH = 32;
+    localparam CLK_PERIOD = 10; // 100 MHz clock
+
+    // ---------------------------------------------------------
+    // Signals
+    // ---------------------------------------------------------
+    logic ACLK;
+    logic ARESETn;
+
+    // Read Address Channel
+    logic [ADDRESS-1:0]    ARADDR;
+    logic                  ARVALID;
+    logic                  ARREADY;
+
+    // Read Data Channel
+    logic                  RREADY;
+    logic                  RVALID;
+    logic [DATA_WIDTH-1:0] RDATA;
+    logic [1:0]            RRESP;
+
+    // Write Address Channel
+    logic [ADDRESS-1:0]    AWADDR;
+    logic                  AWVALID;
+    logic                  AWREADY;
+
+    // Write Data Channel
+    logic [DATA_WIDTH-1:0] WDATA;
+    logic                  WVALID;
+    logic [DATA_WIDTH/8-1:0] WSTRB;
+    logic                  WREADY;
+
+    // Write Response Channel
+    logic                  BREADY;
+    logic                  BVALID;
+    logic [1:0]            BRESP;
+
+    // ---------------------------------------------------------
+    // Device Under Test (DUT) Instantiation
+    // ---------------------------------------------------------
+    axi4_lite_slave #(
+        .ADDRESS(ADDRESS),
+        .DATA_WIDTH(DATA_WIDTH)
+    ) dut (
+        .ACLK(ACLK),
+        .ARESETn(ARESETn),
+        .ARADDR(ARADDR),   .ARVALID(ARVALID), .ARREADY(ARREADY),
+        .RREADY(RREADY),   .RVALID(RVALID),   .RDATA(RDATA),   .RRESP(RRESP),
+        .AWADDR(AWADDR),   .AWVALID(AWVALID), .AWREADY(AWREADY),
+        .WDATA(WDATA),     .WVALID(WVALID),   .WSTRB(WSTRB),   .WREADY(WREADY),
+        .BREADY(BREADY),   .BVALID(BVALID),   .BRESP(BRESP)
+    );
+
+    // ---------------------------------------------------------
+    // Clock Generation
+    // ---------------------------------------------------------
+    initial begin
+        ACLK = 0;
+        forever #(CLK_PERIOD/2) ACLK = ~ACLK;
+    end
+
+    // ---------------------------------------------------------
+    // AXI4-Lite Master Tasks
+    // ---------------------------------------------------------
+    
+    // Task: AXI Write
+    task axi_write(input [ADDRESS-1:0] addr, input [DATA_WIDTH-1:0] data);
+        begin
+            @(posedge ACLK);
+            AWADDR  <= addr;
+            AWVALID <= 1'b1;
+            WDATA   <= data;
+            WVALID  <= 1'b1;
+            WSTRB   <= 4'hF; // All bytes valid
+            BREADY  <= 1'b1;
+
+            // Wait for Slave to accept Address and Data
+            wait(AWREADY && WREADY);
+            @(posedge ACLK);
+            AWVALID <= 1'b0;
+            WVALID  <= 1'b0;
+
+            // Wait for Write Response
+            wait(BVALID);
+            @(posedge ACLK);
+            BREADY <= 1'b0;
+            $display("[TIME: %0t] AXI WRITE -> Addr: 0x%08h | Data: 0x%08h", $time, addr, data);
+        end
+    endtask
+
+    // Task: AXI Read
+    task axi_read(input [ADDRESS-1:0] addr, output [DATA_WIDTH-1:0] data);
+        begin
+            @(posedge ACLK);
+            ARADDR  <= addr;
+            ARVALID <= 1'b1;
+            RREADY  <= 1'b1;
+
+            // Wait for Slave to accept Address
+            wait(ARREADY);
+            @(posedge ACLK);
+            ARVALID <= 1'b0;
+
+            // Wait for Read Data
+            wait(RVALID);
+            data = RDATA;
+            @(posedge ACLK);
+            RREADY <= 1'b0;
+            $display("[TIME: %0t] AXI READ  <- Addr: 0x%08h | Data: 0x%08h", $time, addr, data);
+        end
+    endtask
+
+    // ---------------------------------------------------------
+    // Main Test Sequence
+    // ---------------------------------------------------------
+    logic [DATA_WIDTH-1:0] read_val;
+    int errors;
+
+    initial begin
+        // 1. Initialize Signals
+        ARESETn = 1'b0;
+        ARADDR = 0; ARVALID = 0; RREADY = 0;
+        AWADDR = 0; AWVALID = 0; WDATA = 0; WVALID = 0; WSTRB = 0; BREADY = 0;
+        errors = 0;
+
+        // Setup VCD dumping for waveform viewers (like GTKWave)
+        $dumpfile("axi_slave_tb.vcd");
+        $dumpvars(0, tb_axi4_lite_slave);
+
+        // 2. Apply Reset
+        $display("\n--- Applying Reset ---");
+        #(CLK_PERIOD * 3);
+        ARESETn = 1'b1;
+        #(CLK_PERIOD * 3);
+        $display("--- System Ready ---\n");
+
+        // 3. Write Data Sequence (Note: Byte addresses, so we increment by 4)
+        axi_write(32'h0000_0000, 32'hAAAA_1111); // Register[0]
+        axi_write(32'h0000_0004, 32'hBBBB_2222); // Register[1]
+        axi_write(32'h0000_0008, 32'hCCCC_3333); // Register[2]
+        axi_write(32'h0000_007C, 32'hDEAD_BEEF); // Register[31] (Max offset)
+
+        $display("\n--- Starting Read Verification ---");
+
+        // 4. Read Data Sequence & Verification
+        axi_read(32'h0000_0000, read_val);
+        if (read_val !== 32'hAAAA_1111) begin $error("Mismatch at 0x00!"); errors++; end
+
+        axi_read(32'h0000_0004, read_val);
+        if (read_val !== 32'hBBBB_2222) begin $error("Mismatch at 0x04!"); errors++; end
+
+        axi_read(32'h0000_0008, read_val);
+        if (read_val !== 32'hCCCC_3333) begin $error("Mismatch at 0x08!"); errors++; end
+
+        axi_read(32'h0000_007C, read_val);
+        if (read_val !== 32'hDEAD_BEEF) begin $error("Mismatch at 0x7C!"); errors++; end
+
+        // 5. End Simulation
+        #(CLK_PERIOD * 5);
+        if (errors == 0)
+            $display("\n>>> ALL TESTS PASSED SUCCESSFULLY <<<\n");
+        else
+            $display("\n>>> FINISHED WITH %0d ERRORS <<<\n", errors);
+            
+        $finish;
+    end
+
+endmodule
