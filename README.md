@@ -12,8 +12,8 @@ zynq_can_fd_ip/
     │   │   └── acceptance_filter_bank.sv   # **NEW:** Holds memory-mapped ID/Mask registers (0x60, 0xE0)
     │   │
     │   ├── buffers/
-    │   │   ├── tx_mailbox_manager.sv       # **NEW/REPLACED:** Manages TX Message Space (0x100) & Ready Request (0x90)
-    │   │   ├── rx_buffer_manager.sv        # **NEW/REPLACED:** Manages RX Message Space (0x1100) & FIFO Status (FSR)
+    │   │   ├── tx_mailbox_manager.sv       # **NEW/REPLACED:** Manages TX Message Space (0x100) & Ready Request (0x90) //check
+    │   │   ├── rx_buffer_manager.sv        # **NEW/REPLACED:** Manages RX Message Space (0x1100) & FIFO Status (FSR) //check
     │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4) 
     │   │   └── ram_wrapper.sv              # Standard Dual-Port BRAM primitive (used by TX/RX managers) //check
     │   │
