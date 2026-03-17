@@ -1,0 +1,105 @@
+module rx_manager #(
+    parameter DATA_WIDTH = 32
+)(
+    input  logic                  rst_n,
+    
+    // --- System / AXI Interface (Fast Domain) ---
+    input  logic                  clk_sys,
+    input  logic [DATA_WIDTH-1:0] bus_addr,
+    output logic [DATA_WIDTH-1:0] bus_rd_data,
+    input  logic                  cs_rx,
+    input  logic                  rx_ack,   // CPU says: "I read the data"
+    output logic                  rx_ready, // Tells CPU: "New data arrived!"
+    
+    // --- CAN Core Interface (Precise Domain) ---
+    input  logic                  clk_core,
+    input  logic [5:0]            addr_core,
+    input  logic [DATA_WIDTH-1:0] din_core, 
+    input  logic                  we_core,
+    input  logic                  rx_done   // Core says: "I saved a new frame"
+);
+
+    // ==========================================
+    // 1. Address Translation
+    // ==========================================
+    logic [5:0] ram_addr_axi;
+    assign ram_addr_axi = (bus_addr - 32'h0200) >> 2; 
+
+    // ==========================================
+    // 2. CDC PATH A: Core -> System (rx_done to CPU)
+    // ==========================================
+    logic core_toggle;
+    logic [1:0] sys_sync;
+    logic sys_delay;
+    logic sys_done_pulse;
+
+    // Toggle on core clock when frame is done
+    always_ff @(posedge clk_core or negedge rst_n) begin
+        if (!rst_n) core_toggle <= 1'b0;
+        else if (rx_done) core_toggle <= ~core_toggle;
+    end
+
+    // Catch the toggle on the system clock
+    always_ff @(posedge clk_sys) begin
+        sys_sync  <= {sys_sync[0], core_toggle};
+        sys_delay <= sys_sync[1];
+    end
+    assign sys_done_pulse = sys_sync[1] ^ sys_delay; // Pulse for CPU
+
+    // ==========================================
+    // 3. CDC PATH B: System -> Core (rx_ack to Core)
+    // ==========================================
+    logic sys_toggle;
+    logic [1:0] core_sync;
+    logic core_delay;
+    logic core_ack_pulse;
+
+    // Toggle on sys clock when CPU acknowledges
+    always_ff @(posedge clk_sys or negedge rst_n) begin
+        if (!rst_n) sys_toggle <= 1'b0;
+        else if (rx_ack) sys_toggle <= ~sys_toggle;
+    end
+
+    // Catch the toggle on the core clock
+    always_ff @(posedge clk_core) begin
+        core_sync  <= {core_sync[0], sys_toggle};
+        core_delay <= core_sync[1];
+    end
+    assign core_ack_pulse = core_sync[1] ^ core_delay; // Pulse for Core
+
+    // ==========================================
+    // 4. System State Machine (rx_ready flag)
+    // ==========================================
+    always_ff @(posedge clk_sys or negedge rst_n) begin
+        if (!rst_n) begin
+            rx_ready <= 1'b0;
+        end else if (sys_done_pulse) begin
+            rx_ready <= 1'b1; // Set flag when Core is done
+        end else if (rx_ack) begin
+            rx_ready <= 1'b0; // Clear flag when CPU reads it
+        end
+    end
+
+    // ==========================================
+    // 5. Primitive Storage: True Dual-Port RAM
+    // ==========================================
+    ram_block #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .DEPTH(64) // 64 words to match the 6-bit address
+    ) buffer_ram (
+        // Port A: System Side (Read Only)
+        .clk_axi  (clk_sys),
+        .we_axi   (1'b0), // CPU NEVER writes to the RX buffer!
+        .addr_axi (ram_addr_axi),
+        .din_axi  (32'h0),
+        .dout_axi (bus_rd_data), // Connect directly to AXI read bus
+
+        // Port B: CAN Core Side (Write Only)
+        .clk_core (clk_core),
+        .we_core  (we_core), // MAC Layer controls writing
+        .addr_core(addr_core),
+        .din_core (din_core),
+        .dout_core() // Core doesn't need to read what it just wrote
+    );
+
+endmodule
