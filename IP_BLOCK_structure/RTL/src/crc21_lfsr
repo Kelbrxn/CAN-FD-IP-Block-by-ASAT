@@ -1,0 +1,45 @@
+module crc21_lfsr (
+    input  logic        clk,
+    input  logic        rst_n,
+    input  logic        enable,  
+    input  logic        data_in, 
+    output logic [20:0] crc_out  
+);
+
+    logic [20:0] crc_reg;
+    logic        feedback;
+
+    assign feedback = data_in ^ crc_reg[20];
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            crc_reg <= 21'h1FFFFF; // CAN FD initialization rule
+        end 
+        else if (enable) begin
+            crc_reg[0]  <= feedback;                      // + 1
+            crc_reg[1]  <= crc_reg[0];
+            crc_reg[2]  <= crc_reg[1];
+            crc_reg[3]  <= crc_reg[2]  ^ feedback;        // x^3
+            crc_reg[4]  <= crc_reg[3]  ^ feedback;        // x^4
+            crc_reg[5]  <= crc_reg[4];
+            crc_reg[6]  <= crc_reg[5];
+            crc_reg[7]  <= crc_reg[6]  ^ feedback;        // x^7
+            crc_reg[8]  <= crc_reg[7];
+            crc_reg[9]  <= crc_reg[8];
+            crc_reg[10] <= crc_reg[9];
+            crc_reg[11] <= crc_reg[10] ^ feedback;        // x^11
+            crc_reg[12] <= crc_reg[11];
+            crc_reg[13] <= crc_reg[12] ^ feedback;        // x^13
+            crc_reg[14] <= crc_reg[13];
+            crc_reg[15] <= crc_reg[14];
+            crc_reg[16] <= crc_reg[15];
+            crc_reg[17] <= crc_reg[16];
+            crc_reg[18] <= crc_reg[17];
+            crc_reg[19] <= crc_reg[18];
+            crc_reg[20] <= crc_reg[19] ^ feedback;        // x^20
+        end
+    end
+
+    assign crc_out = crc_reg;
+
+endmodule
