@@ -1,0 +1,49 @@
+module crc_top (
+input   logic           clk,
+input   logic           rst_n,
+input   logic           data_in,
+input   logic           enable,
+input   logic [1:0]     crc_sel,
+output  logic [20:0]    crc_out
+);
+
+logic [14:0]            crc15_out;
+logic [16:0]            crc17_out;
+logic [20:0]            crc21_out;
+
+
+crc15_lfsr crc15 ( 
+    .clk (clk),
+    .rst_n(rst_n),  
+    .enable(enable),
+    .data_in(data_in),
+    .crc_out(crc15_out) 
+    );
+
+crc17_lfsr crc17(
+    .clk (clk),
+    .rst_n(rst_n),
+    .enable(enable),
+    .data_in(data_in),
+    .crc_out(crc17_out) 
+    );
+
+crc21_lfsr crc21(
+    .clk (clk),
+    .rst_n(rst_n),
+    .enable(enable),
+    .data_in(data_in),
+    .crc_out(crc21_out) 
+    );
+
+always_comb begin
+    case (crc_sel)
+        2'b00: crc_out = {6'b0, crc15_out};
+        2'b01: crc_out = {4'b0, crc17_out};
+        2'b10: crc_out = crc21_out;
+        default: crc_out = 21'b0;
+    endcase
+
+end 
+
+endmodule
