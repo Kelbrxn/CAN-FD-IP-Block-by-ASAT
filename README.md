@@ -34,9 +34,9 @@ zynq_can_fd_ip/
     │   │   │
     │   │   ├── crc/
     │   │   │   ├── crc_top.sv              # Polynomial MUX
-    │   │   │   ├── crc15_lfsr.sv           # Classic CAN CRC
-    │   │   │   ├── crc17_lfsr.sv           # FD Short CRC
-    │   │   │   ├── crc21_lfsr.sv           # FD Long CRC
+    │   │   │   ├── crc15_lfsr.sv           # Classic CAN CRC //check
+    │   │   │   ├── crc17_lfsr.sv           # FD Short CRC //check
+    │   │   │   ├── crc21_lfsr.sv           # FD Long CRC //check
     │   │   │   └── stuff_count_logic.sv    # 3-bit Stuff Count + Parity
     │   │   │
     │   │   └── control/
