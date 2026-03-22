@@ -33,7 +33,7 @@ zynq_can_fd_ip/
     │   │   │   └── bit_destuffer.sv        # Logic to remove stuff bits
     │   │   │
     │   │   ├── crc/
-    │   │   │   ├── crc_top.sv              # Polynomial MUX
+    │   │   │   ├── crc_top.sv              # Polynomial MUX /check
     │   │   │   ├── crc15_lfsr.sv           # Classic CAN CRC //check
     │   │   │   ├── crc17_lfsr.sv           # FD Short CRC //check
     │   │   │   ├── crc21_lfsr.sv           # FD Long CRC //check
