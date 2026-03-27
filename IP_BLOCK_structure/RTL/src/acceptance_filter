@@ -1,0 +1,30 @@
+module acceptance_filter #(
+    parameter DEPTH = 16,
+    parameter WIDTH = 32
+)(
+    input  logic              clk,
+    input  logic              rst_n,
+    input  logic [WIDTH-1:0]  filter_reg [DEPTH-1:0], 
+    input  logic [WIDTH-1:0]  mask_reg   [DEPTH-1:0],
+    input  logic [DEPTH-1:0]  enable,
+    input  logic [WIDTH-1:0]  rx_id,
+    output logic              accept
+);
+    logic [DEPTH-1:0] slot_match;
+
+    always_comb begin
+        for (int i = 0; i < DEPTH; i++) begin
+            // 1. (rx_id ^ filter_reg[i]) -> Finds bits that are DIFFERENT
+            // 2. & mask_reg[i]           -> Only keep differences that MATTER
+            // 3. == 0                    -> If no important bits are different, MATCH!
+            if (enable[i] && ((rx_id ^ filter_reg[i]) & mask_reg[i]) == {WIDTH{1'b0}}) begin
+                slot_match[i] = 1'b1;
+            end else begin
+                slot_match[i] = 1'b0;
+            end
+        end
+    end
+
+    assign accept = |slot_match; // If ANY slot matches, accept the message
+
+endmodule
