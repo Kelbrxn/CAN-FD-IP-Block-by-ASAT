@@ -9,12 +9,12 @@ zynq_can_fd_ip/
     │   │   ├── address_decoder.sv          # Generates internal Chip Selects (Updated for Mailbox/ECC offsets) //check
     │   │   ├── register_bank.sv            # Config & Status registers (SRR, MSR, BTR, SR, ECR) //check
     │   │   ├── interrupt_manager.sv        # Aggregates IRQ signals (ISR, IER, ICR) //check
-    │   │   └── acceptance_filter_bank.sv   # **NEW:** Holds memory-mapped ID/Mask registers (0x60, 0xE0)
+    │   │   └── acceptance_filter_bank.sv   # **NEW:** Holds memory-mapped ID/Mask registers (0x60, 0xE0) //check
     │   │
     │   ├── buffers/
     │   │   ├── tx_mailbox_manager.sv       # **NEW/REPLACED:** Manages TX Message Space (0x100) & Ready Request (0x90) //check
     │   │   ├── rx_buffer_manager.sv        # **NEW/REPLACED:** Manages RX Message Space (0x1100) & FIFO Status (FSR) //check
-    │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4) 
+    │   │   ├── ecc_controller.sv           # **NEW:** 1-bit/2-bit Error Correction & Parity logic (0xC8-0xD4) //EITHER HARDWIRED 0 OR ACTUAL MODULE
     │   │   └── ram_wrapper.sv              # Standard Dual-Port BRAM primitive (used by TX/RX managers) //check
     │   │
     │   ├── can_core/
