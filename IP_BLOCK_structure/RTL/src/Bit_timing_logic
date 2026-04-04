@@ -3,19 +3,19 @@ module can_bit_timing (
     input  logic        rst_n,          // Active Low Reset
     
     // Configuration from Register Bank
-    input  logic [7:0]  nom_brp,        // Nominal Prescaler (e.g., 4 for 1Mbps)
-    input  logic [7:0]  data_brp,       // Data Prescaler (e.g., 0 for 5Mbps)
-    input  logic [7:0]  tseg1,          // Time Segment 1 (e.g., 19)
-    input  logic [7:0]  tseg2,          // Time Segment 2 (e.g., 4)
+    input  logic [7:0]  nom_brp,        // Nominal Prescaler
+    input  logic [7:0]  data_brp,       // Data Prescaler
+    input  logic [7:0]  tseg1,          // Time Segment 1
+    input  logic [7:0]  tseg2,          // Time Segment 2
     
-    // Control and Feedback
-    input  logic        is_data_phase,  // Switched by FSM at BRS bit
-    input  logic        rx_pin,         // Physical CAN RX line
-    input  logic        is_idle,        // High if FSM is in IDLE state
+    // Control from FSM & Dedicated Sync Module
+    input  logic        is_data_phase,  // Switched by Protocol FSM
+    input  logic        sync_restart,   // One-cycle pulse from Sync Module to reset counters
     
-    // Outputs to Protocol FSM / CRC / Stuffer
-    output logic        sample_point_en,// High for 1 clock at measurement
-    output logic        bit_done_en     // High for 1 clock at end of bit
+    // Outputs to Protocol FSM / CRC / Stuffer / Sync Module
+    output logic        sample_point_en,
+    output logic        bit_done_en,
+    output logic [7:0]  current_seg_cnt // So the Sync module knows our current phase
 );
 
     // --- 1. Internal Signals ---
@@ -23,38 +23,26 @@ module can_bit_timing (
     logic [7:0] seg_cnt;                // Segment (TQ) counter
     logic       tq_tick;                // Pulse every Time Quantum
     logic [7:0] active_brp;
-    
-    // Sync Logic
-    logic [2:0] rx_sync_reg;            // Double flop + edge detect
-    logic       edge_detected;          // Recessive-to-dominant (1->0)
 
-    // --- 2. Input Synchronization & Edge Detection ---
-    // We must double-flop the RX pin to avoid metastability
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) 
-            rx_sync_reg <= 3'b111;
-        else 
-            rx_sync_reg <= {rx_sync_reg[1:0], rx_pin};
-    end
-    
-    // Detect a High-to-Low transition (Start of a bit)
-    assign edge_detected = (rx_sync_reg[2] == 1'b1 && rx_sync_reg[1] == 1'b0);
-    //
+    // Expose internal counter for external Sync Module math
+    assign current_seg_cnt = seg_cnt;
+
+    // --- 2. The "Gear Shifter" ---
     assign active_brp = is_data_phase ? data_brp : nom_brp;
 
-    // --- 4. Stage 1: The Prescaler (TQ Generator) ---
+    // --- 3. Stage 1: The Prescaler (TQ Generator) ---
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             tq_cnt  <= 8'd0;
             tq_tick <= 1'b0;
-        end else if (edge_detected && is_idle) begin
-            // HARD-SYNC: Reset prescaler on message start
+        end else if (sync_restart) begin
+            // Controlled purely by external Sync Module
             tq_cnt  <= 8'd0;
             tq_tick <= 1'b0;
         end else begin
             if (tq_cnt >= active_brp) begin
                 tq_cnt  <= 8'd0;
-                tq_tick <= 1'b1; // One Time Quantum has passed
+                tq_tick <= 1'b1;
             end else begin
                 tq_cnt  <= tq_cnt + 1'b1;
                 tq_tick <= 1'b0;
@@ -62,21 +50,20 @@ module can_bit_timing (
         end
     end
 
-    // --- 5. Stage 2: The Segment Counter ---
+    // --- 4. Stage 2: The Segment Counter ---
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             seg_cnt         <= 8'd0;
             sample_point_en <= 1'b0;
             bit_done_en     <= 1'b0;
-        end else if (edge_detected && is_idle) begin
-            // HARD-SYNC: Align the bit start to the edge
+        end else if (sync_restart) begin
+            // Controlled purely by external Sync Module
             seg_cnt         <= 8'd0;
             sample_point_en <= 1'b0;
             bit_done_en     <= 1'b0;
         end else if (tq_tick) begin
             
             // Generate Sample Point (End of TSEG1)
-            // Logic: Sync(1) + TSEG1. If TSEG1 is 19, sample at TQ 20.
             if (seg_cnt == tseg1) begin
                 sample_point_en <= 1'b1;
             end else begin
@@ -84,7 +71,7 @@ module can_bit_timing (
             end
 
             // Generate Bit Done (End of TSEG2)
-            // Logic: Sync(1) + TSEG1 + TSEG2. For 25 TQs, count to 24.
+            // Total = 1 (Sync) + TSEG1 + TSEG2
             if (seg_cnt >= (tseg1 + tseg2 + 1)) begin
                 bit_done_en <= 1'b1;
                 seg_cnt     <= 8'd0;
@@ -94,7 +81,7 @@ module can_bit_timing (
             end
             
         end else begin
-            // Default: Keep pulses strictly 1 clock cycle wide
+            // Ensure pulses only last one clock cycle
             sample_point_en <= 1'b0;
             bit_done_en     <= 1'b0;
         end
