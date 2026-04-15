@@ -12,6 +12,10 @@ module can_bit_timing (
     input  logic        is_data_phase,  // Switched by Protocol FSM
     input  logic        sync_restart,   // One-cycle pulse from Sync Module to reset counters
     
+    // Re-Sync Modifiers from Sync Module
+    input  logic [7:0]  tseg1_modifier, // Added to stretch the bit
+    input  logic [7:0]  tseg2_modifier, // Subtracted to shrink the bit
+    
     // Outputs to Protocol FSM / CRC / Stuffer / Sync Module
     output logic        sample_point_en,
     output logic        bit_done_en,
@@ -63,16 +67,16 @@ module can_bit_timing (
             bit_done_en     <= 1'b0;
         end else if (tq_tick) begin
             
-            // Generate Sample Point (End of TSEG1)
-            if (seg_cnt == tseg1) begin
+            // Generate Sample Point (End of TSEG1 + Stretch)
+            if (seg_cnt == (tseg1 + tseg1_modifier)) begin
                 sample_point_en <= 1'b1;
             end else begin
                 sample_point_en <= 1'b0;
             end
 
-            // Generate Bit Done (End of TSEG2)
-            // Total = 1 (Sync) + TSEG1 + TSEG2
-            if (seg_cnt >= (tseg1 + tseg2 + 1)) begin
+            // Generate Bit Done (End of TSEG2 - Shrink)
+            // Total = 1 (Sync) + (TSEG1 + Stretch) + (TSEG2 - Shrink)
+            if (seg_cnt >= (tseg1 + tseg1_modifier + tseg2 - tseg2_modifier + 1)) begin
                 bit_done_en <= 1'b1;
                 seg_cnt     <= 8'd0;
             end else begin
