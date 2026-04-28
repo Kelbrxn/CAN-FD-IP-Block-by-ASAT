@@ -1,0 +1,91 @@
+module can_rx_destuffer (
+    input  logic       clk,
+    input  logic       rst_n,
+    
+    // Inputs from Bit Timing Module
+    input  logic       sample_point_en,
+    input  logic       rx_bit,
+    
+    // Control from Protocol FSM
+    input  logic       new_frame_reset,          // Pulses high at Start of Frame (SOF)
+    input  logic       disable_dynamic_stuffing, // High during CAN FD CRC phase
+    
+    // Outputs to Protocol FSM
+    output logic       destuffed_bit,            // The clean data bit
+    output logic       bit_valid_en,             // Pulses high when destuffed_bit is valid
+    output logic       stuff_error               // Pulses high on a 6-bit violation
+);
+
+    // --- Internal State Registers ---
+    logic [2:0] consecutive_cnt;
+    logic       prev_bit;
+
+    // --- Destuffing Logic ---
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            consecutive_cnt <= 3'd1;
+            prev_bit        <= 1'b1; // Bus idles high (1)
+            destuffed_bit   <= 1'b1;
+            bit_valid_en    <= 1'b0;
+            stuff_error     <= 1'b0;
+            
+        end else begin
+            // Default pulse behaviors
+            bit_valid_en <= 1'b0;
+            stuff_error  <= 1'b0;
+            
+            // 1. Reset on new frame (Start of Frame)
+            if (new_frame_reset) begin
+                consecutive_cnt <= 3'd1;
+                prev_bit        <= rx_bit;   // Usually 0 for SOF
+                destuffed_bit   <= rx_bit;
+                bit_valid_en    <= 1'b1;     // SOF is a valid payload bit
+                
+            // 2. Process incoming bits at the Sample Point
+            end else if (sample_point_en) begin
+                
+                // Route A: CAN FD Bypass (e.g., during CRC Phase)
+                if (disable_dynamic_stuffing) begin
+                    destuffed_bit   <= rx_bit;
+                    bit_valid_en    <= 1'b1;         // Pass everything through
+                    prev_bit        <= rx_bit;
+                    consecutive_cnt <= 3'd1;         // Keep tracker reset
+                    
+                // Route B: Normal Dynamic Destuffing
+                end else begin
+                    destuffed_bit <= rx_bit; 
+                    
+                    // --- SCENARIO 1: We are expecting a Stuff Bit ---
+                    if (consecutive_cnt == 3'd5) begin
+                        
+                        if (rx_bit == prev_bit) begin
+                            // FATAL ERROR! 6 bits of the same polarity
+                            stuff_error     <= 1'b1;
+                            bit_valid_en    <= 1'b0; 
+                        end else begin
+                            // Valid Stuff Bit (Opposite polarity)
+                            stuff_error     <= 1'b0;
+                            bit_valid_en    <= 1'b0; // Output 0 so FSM ignores it
+                            
+                            // The stuff bit itself counts as the first bit of a new sequence!
+                            consecutive_cnt <= 3'd1; 
+                            prev_bit        <= rx_bit; 
+                        end
+                        
+                    // --- SCENARIO 2: Normal Payload Bit ---
+                    end else begin
+                        bit_valid_en <= 1'b1; // This is valid data, send to FSM!
+                        prev_bit     <= rx_bit;
+                        
+                        if (rx_bit == prev_bit) begin
+                            consecutive_cnt <= consecutive_cnt + 1'b1;
+                        end else begin
+                            consecutive_cnt <= 3'd1;
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+endmodule
